@@ -2,8 +2,9 @@
 
 use std::{
     collections::HashMap,
-    convert::TryInto,
-    env, fmt, fs, mem,
+    env,
+    fmt::{self},
+    fs, mem,
     ops::Range,
     panic,
     path::{Path, PathBuf},
@@ -25,53 +26,53 @@ fn update_expect() -> bool {
 macro_rules! expect {
     ($actual:literal) => {
         $crate::Expect {
-            position: $crate::Position {
+            file_position: $crate::FilePosition {
                 file: file!(),
                 line: line!(),
                 column: column!(),
             },
             raw_actual: stringify!($actual),
-            data: None,
-            raw_data: None,
+            expected: None,
+            raw_expected: None,
         }
         .assert_eq($actual)
     };
     ($actual:literal, $expected:literal) => {
         $crate::Expect {
-            position: $crate::Position {
+            file_position: $crate::FilePosition {
                 file: file!(),
                 line: line!(),
                 column: column!(),
             },
             raw_actual: stringify!($actual),
-            data: Some($expected),
-            raw_data: Some(stringify!($expected)),
+            expected: Some($expected),
+            raw_expected: Some(stringify!($expected)),
         }
         .assert_eq($actual)
     };
     ($actual:expr) => {
         $crate::Expect {
-            position: $crate::Position {
+            file_position: $crate::FilePosition {
                 file: file!(),
                 line: line!(),
                 column: column!(),
             },
             raw_actual: stringify!($actual),
-            data: None,
-            raw_data: None,
+            expected: None,
+            raw_expected: None,
         }
         .assert_debug_eq($actual)
     };
     ($actual:expr, $expected:literal) => {
         $crate::Expect {
-            position: $crate::Position {
+            file_position: $crate::FilePosition {
                 file: file!(),
                 line: line!(),
                 column: column!(),
             },
             raw_actual: stringify!($actual),
-            data: Some($expected),
-            raw_data: Some(stringify!($expected)),
+            expected: Some($expected),
+            raw_expected: Some(stringify!($expected)),
         }
         .assert_debug_eq($actual)
     };
@@ -81,18 +82,17 @@ macro_rules! expect {
 #[derive(Debug)]
 pub struct Expect {
     #[doc(hidden)]
-    pub position: Position,
+    pub file_position: FilePosition,
     #[doc(hidden)]
     pub raw_actual: &'static str,
     #[doc(hidden)]
-    pub data: Option<&'static str>,
+    pub expected: Option<&'static str>,
     #[doc(hidden)]
-    pub raw_data: Option<&'static str>,
+    pub raw_expected: Option<&'static str>,
 }
 
-/// Position of original `expect!` in the source file.
 #[derive(Debug)]
-pub struct Position {
+pub struct FilePosition {
     #[doc(hidden)]
     pub file: &'static str,
     #[doc(hidden)]
@@ -101,25 +101,25 @@ pub struct Position {
     pub column: u32,
 }
 
-impl std::fmt::Display for Position {
+impl fmt::Display for FilePosition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}:{}", self.file, self.line, self.column)
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug, Clone, Copy)]
 enum StrLitKind {
     Normal,     // use ""
     Raw(usize), // use r#""# with variable number of #'s
 }
 
 impl StrLitKind {
-    fn write_start(self, w: &mut impl std::fmt::Write) -> std::fmt::Result {
+    fn write_start(&self, w: &mut impl std::fmt::Write) -> std::fmt::Result {
         match self {
             Self::Normal => write!(w, "\""),
             Self::Raw(n) => {
                 write!(w, "r")?;
-                for _ in 0..n {
+                for _ in 0..*n {
                     write!(w, "#")?;
                 }
                 write!(w, "\"")
@@ -127,12 +127,12 @@ impl StrLitKind {
         }
     }
 
-    fn write_end(self, w: &mut impl std::fmt::Write) -> std::fmt::Result {
+    fn write_end(&self, w: &mut impl std::fmt::Write) -> std::fmt::Result {
         match self {
             Self::Normal => write!(w, "\""),
             Self::Raw(n) => {
                 write!(w, "\"")?;
-                for _ in 0..n {
+                for _ in 0..*n {
                     write!(w, "#")?;
                 }
                 Ok(())
@@ -142,49 +142,49 @@ impl StrLitKind {
 }
 
 impl Expect {
-    fn trimmed(text: &str) -> String {
+    fn trimmed(&self, text: &str) -> String {
         if text.contains('\n') {
-            Self::trim_indent(text)
+            let text = if text.starts_with('\n') {
+                &text[1..]
+            } else {
+                text
+            };
+            let indent_amount = text
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| line.len() - line.trim_start().len())
+                .min()
+                .unwrap_or(0);
+
+            let mut trimmed = text
+                .lines()
+                .map(|line| {
+                    if line.len() < indent_amount {
+                        ""
+                    } else {
+                        &line[indent_amount..]
+                    }
+                })
+                .collect::<Vec<&str>>()
+                .join("\n");
+            // text always contains at least 1 character (because of if text.contains('\n'))
+            if text.chars().last().unwrap() == '\n' {
+                trimmed.push('\n');
+            }
+            trimmed
         } else {
             text.to_string()
         }
     }
 
-    fn trim_indent(text: &str) -> String {
-        let text = if text.starts_with('\n') {
-            &text[1..]
-        } else {
-            text
-        };
-        let indent = text
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| line.len() - line.trim_start().len())
-            .min()
-            .unwrap_or(0);
-
-        let mut trimmed = text
-            .lines()
-            .map(|line| {
-                if line.len() < indent {
-                    ""
-                } else {
-                    &line[indent..]
-                }
-            })
-            .collect::<Vec<&str>>()
-            .join("\n");
-        if text.chars().last().unwrap() == '\n' {
-            trimmed.push('\n');
-        }
-        trimmed
-    }
-
     pub fn assert_eq(&self, actual: &str) {
-        let trimmed = self.data.map(|data| Self::trimmed(data));
-        let matches = trimmed.as_ref().map_or(false, |s| s == actual);
-        if !matches {
-            Runtime::fail_expect(self, trimmed.as_deref().unwrap_or(""), actual);
+        if let Some(expected) = self.expected {
+            let expected = self.trimmed(expected);
+            if expected != actual {
+                Runtime::fail_expect(self, &expected, actual);
+            }
+        } else {
+            Runtime::fail_expect(self, "", actual);
         }
     }
 
@@ -196,9 +196,9 @@ impl Expect {
         self.assert_eq(&actual)
     }
 
-    fn find_expect_location(&self, file: &str) -> Location {
-        let line_number: usize = (self.position.line - 1).try_into().unwrap(); // Zero-indexed
-        let column_number: usize = (self.position.column - 1).try_into().unwrap(); // Zero-indexed
+    fn find_expect_location(&self, file: &str) -> ExpectLocation {
+        let line_number: usize = (self.file_position.line - 1).try_into().unwrap(); // Zero-indexed
+        let column_number: usize = (self.file_position.column - 1).try_into().unwrap(); // Zero-indexed
         let line_byte_offset = if line_number == 0 {
             0
         } else {
@@ -213,33 +213,33 @@ impl Expect {
                 .skip(1) // !
                 .next()
                 .expect("Failed to locate macro")
-                .0;
+                .0; // extract index from (index, char)
+
         let actual_byte_offset = macro_byte_offset
             + (&file[macro_byte_offset..])
                 .find(self.raw_actual)
                 .expect("Unable to find actual");
+        let actual_range = actual_byte_offset..(actual_byte_offset + self.raw_actual.len());
 
-        let literal_range = self.raw_data.map_or_else(
-            || {
-                let expect_byte_offset = actual_byte_offset + self.raw_actual.len();
-                expect_byte_offset..expect_byte_offset
-            },
-            |data| {
-                let expect_byte_offset = actual_byte_offset
-                    + (&file[actual_byte_offset..])
-                        .find(data)
-                        .expect("Unable to find expected");
-                expect_byte_offset..(expect_byte_offset + data.len())
-            },
-        );
+        let expected_range = if let Some(raw_expected) = self.raw_expected {
+            let expect_byte_offset = actual_byte_offset
+                + (&file[actual_byte_offset..])
+                    .find(raw_expected)
+                    .expect("Unable to find expected");
+            expect_byte_offset..(expect_byte_offset + raw_expected.len())
+        } else {
+            let expect_byte_offset = actual_byte_offset + self.raw_actual.len();
+            expect_byte_offset..expect_byte_offset
+        };
         let line_indent = (&file[line_byte_offset..])
             .chars()
             .take_while(|&c| c == ' ')
             .count();
 
-        Location {
+        ExpectLocation {
             line_indent,
-            literal_range,
+            actual_range,
+            expected_range,
         }
     }
 }
@@ -255,16 +255,16 @@ impl Runtime {
     fn fail_expect(expect: &Expect, expected: &str, actual: &str) {
         let mut rt = RT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if update_expect() {
-            println!("\x1b[1m\x1b[92mupdating\x1b[0m: {}", expect.position);
+            println!("\x1b[1m\x1b[92mupdating\x1b[0m: {}", expect.file_position);
             rt.per_file
-                .entry(expect.position.file)
+                .entry(expect.file_position.file)
                 .or_insert_with(|| FileRuntime::new(expect))
                 .update(expect, actual);
             return;
         }
-        rt.panic(expect.position.to_string(), expected, actual);
+        rt.panic(&expect.file_position, expected, actual);
     }
-    fn panic(&mut self, position: String, expected: &str, actual: &str) {
+    fn panic(&mut self, position: &FilePosition, expected: &str, actual: &str) {
         let print_help = !mem::replace(&mut self.help_printed, true);
         let help = if print_help { HELP } else { "" };
 
@@ -290,7 +290,7 @@ impl Runtime {
 {}
 ----
 ",
-            position,
+            position.to_string(),
             help,
             expected,
             actual,
@@ -309,7 +309,7 @@ struct FileRuntime {
 
 impl FileRuntime {
     fn new(expect: &Expect) -> FileRuntime {
-        let path = to_abs_ws_path(Path::new(expect.position.file));
+        let path = to_abs_ws_path(Path::new(expect.file_position.file));
         let original_text = fs::read_to_string(&path).unwrap();
         let patchwork = Patchwork::new(original_text.clone());
         FileRuntime {
@@ -320,22 +320,31 @@ impl FileRuntime {
     }
     fn update(&mut self, expect: &Expect, actual: &str) {
         let loc = expect.find_expect_location(&self.original_text);
-        let desired_indent = Some(loc.line_indent);
-        let patch = format_patch(desired_indent, actual);
-        let patch = if expect.data.is_none() {
-            format!(", {}", &patch)
+
+        let patch = format_patch(loc.line_indent, actual);
+        let patch = if expect.raw_expected.is_none() {
+            let is_multiline = patch.contains('\n');
+            if is_multiline {
+                let indent = " ".repeat(loc.line_indent);
+                self.patchwork
+                    .patch_insert(loc.actual_range.start, &format!("\n{indent}    "));
+                format!(",\n{indent}    {patch}\n{indent}")
+            } else {
+                format!(", {patch}")
+            }
         } else {
             patch
         };
-        self.patchwork.patch(loc.literal_range, &patch);
+        self.patchwork.patch_range(loc.expected_range, &patch);
         fs::write(&self.path, &self.patchwork.text).unwrap()
     }
 }
 
 #[derive(Debug)]
-struct Location {
+struct ExpectLocation {
     line_indent: usize,
-    literal_range: Range<usize>,
+    actual_range: Range<usize>,
+    expected_range: Range<usize>,
 }
 
 #[derive(Debug)]
@@ -351,10 +360,10 @@ impl Patchwork {
             indels: Vec::new(),
         }
     }
-    fn patch(&mut self, mut range: Range<usize>, patch: &str) {
-        self.indels.push((range.clone(), patch.len()));
-        self.indels.sort_by_key(|(delete, _insert)| delete.start);
-
+    fn patch_insert(&mut self, offset: usize, patch: &str) {
+        self.patch_range(offset..offset, patch)
+    }
+    fn patch_range(&mut self, range: Range<usize>, patch: &str) {
         let (delete, insert) = self
             .indels
             .iter()
@@ -362,36 +371,39 @@ impl Patchwork {
             .map(|(delete, insert)| (delete.end - delete.start, insert))
             .fold((0usize, 0usize), |(x1, y1), (x2, y2)| (x1 + x2, y1 + y2));
 
-        for pos in &mut [&mut range.start, &mut range.end] {
-            **pos -= delete;
-            **pos += insert;
-        }
+        let offset = insert - delete;
+        self.text
+            .replace_range((range.start + offset)..(range.end + offset), &patch);
 
-        self.text.replace_range(range, &patch);
+        self.indels.push((range, patch.len()));
+        self.indels.sort_by_key(|(delete, _insert)| delete.start);
     }
 }
 
 fn lit_kind_for_patch(patch: &str) -> StrLitKind {
     let has_double_quote = patch.chars().any(|c| c == '"');
-    if !has_double_quote {
+    if has_double_quote {
+        // Find the maximum number of hashes that follow a double quote in the string.
+        // We need to use one more than that to delimit the string.
+        let max_hashes = patch
+            .split('"')
+            .map(|s: &str| s.chars().take_while(|&c| c == '#').count())
+            .max()
+            .unwrap();
+        StrLitKind::Raw(max_hashes + 1)
+    } else {
         let has_backslash_or_newline = patch.chars().any(|c| matches!(c, '\\' | '\n'));
-        return if has_backslash_or_newline {
+        if has_backslash_or_newline {
             StrLitKind::Raw(1)
         } else {
             StrLitKind::Normal
-        };
+        }
     }
-
-    // Find the maximum number of hashes that follow a double quote in the string.
-    // We need to use one more than that to delimit the string.
-    let leading_hashes = |s: &str| s.chars().take_while(|&c| c == '#').count();
-    let max_hashes = patch.split('"').map(leading_hashes).max().unwrap();
-    StrLitKind::Raw(max_hashes + 1)
 }
 
-fn format_patch(desired_indent: Option<usize>, patch: &str) -> String {
+fn format_patch(desired_indent: usize, patch: &str) -> String {
     let lit_kind = lit_kind_for_patch(patch);
-    let indent = desired_indent.map(|it| " ".repeat(it));
+    let indent = " ".repeat(desired_indent);
     let is_multiline = patch.contains('\n');
 
     let mut buf = String::new();
@@ -400,10 +412,8 @@ fn format_patch(desired_indent: Option<usize>, patch: &str) -> String {
         for line in patch.lines() {
             buf.push('\n');
             if !line.trim().is_empty() {
-                if let Some(indent) = &indent {
-                    buf.push_str(indent);
-                    buf.push_str("    ");
-                }
+                buf.push_str(&indent);
+                buf.push_str("    ");
             }
             buf.push_str(line);
         }
@@ -470,11 +480,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_trivial_assert() {
+    fn test_trivial_assert_empty_literal() {
         expect!("", "");
+    }
+
+    #[test]
+    fn test_trivial_assert_literal() {
+        expect!("ABC", "ABC");
+    }
+
+    #[test]
+    fn test_trivial_assert_expression() {
         expect!(&5, "5");
+    }
+
+    #[test]
+    fn test_trivial_assert_expression2() {
         let x = 5;
         expect!(x, "5");
+    }
+
+    #[test]
+    fn test_vec() {
+        let v = vec![1];
+        expect!(
+            v,
+            r#"
+            [
+                1,
+            ]"#
+        );
     }
 
     #[test]
@@ -504,9 +539,18 @@ mod tests {
     }
 
     #[test]
-    fn test_lit_kind_for_patch() {
+    fn test_lit_kind_for_patch_empty() {
         expect!(&lit_kind_for_patch(""), "Normal");
+    }
+
+    #[test]
+    fn test_lit_kind_for_patch_normal() {
         expect!(&lit_kind_for_patch("ABCDEFG"), "Normal");
+        expect!(&lit_kind_for_patch("single line"), "Normal");
+    }
+
+    #[test]
+    fn test_lit_kind_for_patch_new_lines() {
         expect!(
             &lit_kind_for_patch("hello\nworld\n"),
             r#"
@@ -514,6 +558,10 @@ mod tests {
                 1,
             )"#
         );
+    }
+
+    #[test]
+    fn test_lit_kind_for_patch_tabs() {
         expect!(
             &lit_kind_for_patch(r"hello\tworld"),
             r#"
@@ -521,6 +569,10 @@ mod tests {
                 1,
             )"#
         );
+    }
+
+    #[test]
+    fn test_lit_kind_for_patch_double_quotes() {
         expect!(
             &lit_kind_for_patch("{\"foo\": 42}"),
             r#"
@@ -528,55 +580,54 @@ mod tests {
                 1,
             )"#
         );
+    }
+
+    #[test]
+    fn test_lit_kind_for_patch_double_quote_hash() {
         expect!(
-            &lit_kind_for_patch("hello\nworld\n"),
+            &lit_kind_for_patch("\"#\""),
             r#"
             Raw(
-                1,
-            )"#
-        );
-        expect!(&lit_kind_for_patch("single line"), "Normal");
-        expect!(
-            &lit_kind_for_patch("hello\nworld\n"),
-            r#"
-            Raw(
-                1,
+                2,
             )"#
         );
     }
 
     #[test]
-    fn test_format_patch() {
-        let patch = format_patch(None, "\n");
-        expect!(&patch, r##""r#\"\n\n\"#""##);
+    fn test_lit_kind_for_patch_double_quote_triple_hash() {
+        expect!(
+            &lit_kind_for_patch("\"###\""),
+            r#"
+            Raw(
+                4,
+            )"#
+        );
+    }
 
-        let patch = format_patch(None, "hello\nworld\n");
-        expect!(&patch, r##""r#\"\nhello\nworld\n\"#""##);
-
-        let patch = format_patch(None, r"hello\tworld");
-        expect!(&patch, r##""r#\"hello\\tworld\"#""##);
-
-        let patch = format_patch(None, "{\"foo\": 42}");
-        expect!(&patch, r##""r#\"{\"foo\": 42}\"#""##);
-
-        let patch = format_patch(Some(0), "hello\nworld\n");
+    #[test]
+    fn test_format_patch_multi_line() {
+        let patch = format_patch(0, "hello\nworld\n");
         expect!(&patch, r##""r#\"\n    hello\n    world\n\"#""##);
+    }
 
-        let patch = format_patch(Some(4), "single line");
+    #[test]
+    fn test_format_patch_single_line() {
+        let patch = format_patch(0, "single line");
         expect!(&patch, r#""\"single line\"""#);
     }
 
     #[test]
     fn test_patchwork() {
         let mut patchwork = Patchwork::new("one two three".to_string());
-        patchwork.patch(4..7, "zwei");
-        patchwork.patch(0..3, "один");
-        patchwork.patch(8..13, "3");
+        patchwork.patch_range(4..7, "zwei");
+        patchwork.patch_range(0..3, "один");
+        patchwork.patch_range(8..13, "3");
+        patchwork.patch_insert(13, "333");
         expect!(
             &patchwork,
             r#"
             Patchwork {
-                text: "один zwei 3",
+                text: "один zwei 3333",
                 indels: [
                     (
                         0..3,
@@ -589,6 +640,10 @@ mod tests {
                     (
                         8..13,
                         1,
+                    ),
+                    (
+                        13..13,
+                        3,
                     ),
                 ],
             }"#
