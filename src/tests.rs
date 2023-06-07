@@ -33,9 +33,9 @@ fn test_vec() {
     expect!(
         v,
         r#"
-            [
-                1,
-            ]"#
+        [
+            1,
+        ]"#
     );
 }
 
@@ -81,9 +81,9 @@ fn test_lit_kind_for_patch_new_lines() {
     expect!(
         StrLitKind::from("hello\nworld\n"),
         r#"
-            Raw(
-                1,
-            )"#
+        Raw(
+            1,
+        )"#
     );
 }
 
@@ -92,9 +92,9 @@ fn test_lit_kind_for_patch_tabs() {
     expect!(
         StrLitKind::from(r"hello\tworld"),
         r#"
-            Raw(
-                1,
-            )"#
+        Raw(
+            1,
+        )"#
     );
 }
 
@@ -103,9 +103,9 @@ fn test_lit_kind_for_patch_double_quotes() {
     expect!(
         StrLitKind::from("{\"foo\": 42}"),
         r#"
-            Raw(
-                1,
-            )"#
+        Raw(
+            1,
+        )"#
     );
 }
 
@@ -114,9 +114,9 @@ fn test_lit_kind_for_patch_double_quote_hash() {
     expect!(
         StrLitKind::from("\"#\""),
         r#"
-            Raw(
-                2,
-            )"#
+        Raw(
+            2,
+        )"#
     );
 }
 
@@ -125,9 +125,9 @@ fn test_lit_kind_for_patch_double_quote_triple_hash() {
     expect!(
         StrLitKind::from("\"###\""),
         r#"
-            Raw(
-                4,
-            )"#
+        Raw(
+            4,
+        )"#
     );
 }
 

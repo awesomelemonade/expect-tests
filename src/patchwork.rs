@@ -39,9 +39,11 @@ impl Patchwork {
             })
             .fold((0usize, 0usize), |(x1, y1), (x2, y2)| (x1 + x2, y1 + y2));
 
-        let offset = insert - delete;
-        self.text
-            .replace_range((range.start + offset)..(range.end + offset), patch);
+        let offset = insert as i32 - delete as i32;
+        self.text.replace_range(
+            ((range.start as i32 + offset) as usize)..((range.end as i32 + offset) as usize),
+            patch,
+        );
 
         self.patches.push(Patch {
             deletion_range: range,
