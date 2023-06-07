@@ -13,7 +13,7 @@ use crate::{
 };
 const HELP: &str = "
 You can update all `expect!` tests by running:
-    env UPDATE_EXPECT=1 cargo test
+    UPDATE_EXPECT=1 cargo test
 To update a single test, place the cursor on `expect` token and use `run` feature of rust-analyzer.
 ";
 
@@ -100,8 +100,8 @@ impl FileRuntime {
             self.patchwork
                 .patch_range(expected_range.clone(), &patch, PatchOrdering::Normal);
         } else {
-            let is_multiline = patch.contains('\n'); // We should only do this for multiline expects
-            let is_first_assertion = expect.assertion_index == 0; // We should only do this once per expect
+            let is_multiline = patch.contains('\n');
+            let is_first_assertion = expect.assertion_index == 0;
 
             // TODO-someday: if we're the first assertion, we should queue deletion of all other arguments - we assume that this expect is never called again
 
