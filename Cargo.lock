@@ -10,7 +10,7 @@ checksum = "210ec60ae7d710bed8683e333e9d2855a8a56a3e9892b38bad3bb0d4d29b0d5e"
 
 [[package]]
 name = "expect-tests"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dissimilar",
  "once_cell",

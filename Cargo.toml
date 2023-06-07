@@ -1,7 +1,7 @@
 [package]
 name = "expect-tests"
-version = "0.1.0"
-description = "Minimalistic snapshot testing library"
+version = "0.1.1"
+description = "(A better) minimalistic snapshot testing library"
 keywords = ["snapshot", "testing", "expect"]
 categories = ["development-tools::testing"]
 license = "MIT OR Apache-2.0"

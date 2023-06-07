@@ -242,3 +242,30 @@ pub fn test_find_expect_location() {
         }"#
     );
 }
+
+#[test]
+pub fn test_fibonacci() {
+    fn fibonacci(x: usize) -> usize {
+        let mut z = vec![];
+        z.push(0);
+        z.push(1);
+        for i in 2..=x {
+            z.push(z[i - 1] + z[i - 2]);
+        }
+        z[x]
+    }
+    expect!(fibonacci(15), "610");
+}
+
+#[test]
+pub fn test_callback_expect() {
+    fn some_complicated_io_func(callback: impl Fn(i32)) {
+        callback(5);
+        callback(3);
+        callback(10);
+    }
+
+    some_complicated_io_func(|status_value| {
+        expect!(status_value, "5", "3", "10");
+    })
+}
