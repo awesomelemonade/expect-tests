@@ -6,7 +6,11 @@ use std::{
 
 use once_cell::sync::{Lazy, OnceCell};
 
-use crate::{patchwork::Patchwork, str_lit_kind::StrLitKind, update_expect, Expect, FilePosition};
+use crate::{
+    patchwork::{PatchOrdering, Patchwork},
+    str_lit_kind::StrLitKind,
+    update_expect, Expect, FilePosition,
+};
 const HELP: &str = "
 You can update all `expect!` tests by running:
     env UPDATE_EXPECT=1 cargo test
@@ -21,13 +25,13 @@ pub struct Runtime {
 static RT: Lazy<Mutex<Runtime>> = Lazy::new(Default::default);
 
 impl Runtime {
-    pub fn fail_expect(expect: &Expect, expected: &str, actual: &str) {
+    pub fn fail_expect<const N: usize>(expect: &Expect<N>, expected: &str, actual: &str) {
         let mut rt = RT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if update_expect() {
             println!("\x1b[1m\x1b[92mupdating\x1b[0m: {}", expect.file_position);
             rt.per_file
                 .entry(expect.file_position.file)
-                .or_insert_with(|| FileRuntime::new(expect))
+                .or_insert_with_key(|&filename| FileRuntime::new(filename))
                 .update(expect, actual);
             return;
         }
@@ -77,8 +81,8 @@ struct FileRuntime {
 }
 
 impl FileRuntime {
-    fn new(expect: &Expect) -> FileRuntime {
-        let path = to_abs_ws_path(Path::new(expect.file_position.file));
+    fn new(filename: &str) -> FileRuntime {
+        let path = to_abs_ws_path(Path::new(filename));
         let original_text = std::fs::read_to_string(&path).unwrap();
         let patchwork = Patchwork::new(original_text.clone());
         FileRuntime {
@@ -87,24 +91,42 @@ impl FileRuntime {
             patchwork,
         }
     }
-    fn update(&mut self, expect: &Expect, actual: &str) {
+    fn update<const N: usize>(&mut self, expect: &Expect<N>, actual: &str) {
+        let index = expect.assertion_index;
         let loc = expect.find_expect_location(&self.original_text);
 
         let patch = format_patch(loc.line_indent, actual);
-        let patch = if expect.raw_expected.is_none() {
-            let is_multiline = patch.contains('\n');
-            if is_multiline {
-                let indent = " ".repeat(loc.line_indent);
-                self.patchwork
-                    .patch_insert(loc.actual_range.start, &format!("\n{indent}    "));
-                format!(",\n{indent}    {patch}\n{indent}")
-            } else {
-                format!(", {patch}")
-            }
+        if let Some(expected_range) = loc.expected_ranges.get(index) {
+            self.patchwork
+                .patch_range(expected_range.clone(), &patch, PatchOrdering::Normal);
         } else {
-            patch
-        };
-        self.patchwork.patch_range(loc.expected_range, &patch);
+            let is_multiline = patch.contains('\n'); // We should only do this for multiline expects
+            let is_first_assertion = expect.assertion_index == 0; // We should only do this once per expect
+
+            // TODO-someday: if we're the first assertion, we should queue deletion of all other arguments - we assume that this expect is never called again
+
+            let indent = " ".repeat(loc.line_indent);
+            if is_multiline && is_first_assertion {
+                self.patchwork.patch_insert(
+                    loc.start_index,
+                    &format!("\n{indent}    "),
+                    PatchOrdering::BeforeOtherPatches,
+                );
+                self.patchwork.patch_insert(
+                    loc.end_index,
+                    &format!("\n{indent}"),
+                    PatchOrdering::AfterOtherPatches,
+                );
+            }
+            // TODO-someday: what happens if some arguments are multiline and others are not?
+            let patch = if is_multiline {
+                format!(",\n{indent}    {patch}")
+            } else {
+                format!(", {}", patch)
+            };
+            self.patchwork
+                .patch_insert(loc.end_index, &patch, PatchOrdering::Normal);
+        }
         std::fs::write(&self.path, self.patchwork.text()).unwrap()
     }
 }

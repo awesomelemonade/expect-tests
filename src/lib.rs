@@ -18,73 +18,95 @@ fn update_expect() -> bool {
 #[macro_export]
 macro_rules! expect {
     ($actual:literal) => {
-        $crate::Expect {
-            file_position: $crate::FilePosition {
-                file: file!(),
-                line: line!(),
-                column: column!(),
-            },
-            raw_actual: stringify!($actual),
-            expected: None,
-            raw_expected: None,
+        {
+            static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let index = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            $crate::Expect {
+                file_position: $crate::FilePosition {
+                    file: file!(),
+                    line: line!(),
+                    column: column!(),
+                },
+                raw_actual: stringify!($actual),
+                expected: [],
+                raw_expected: [],
+                assertion_index: index,
+            }
+            .assert_eq($actual)
         }
-        .assert_eq($actual)
-    };
-    ($actual:literal, $expected:literal) => {
-        $crate::Expect {
-            file_position: $crate::FilePosition {
-                file: file!(),
-                line: line!(),
-                column: column!(),
-            },
-            raw_actual: stringify!($actual),
-            expected: Some($expected),
-            raw_expected: Some(stringify!($expected)),
-        }
-        .assert_eq($actual)
     };
     ($actual:expr) => {
-        $crate::Expect {
-            file_position: $crate::FilePosition {
-                file: file!(),
-                line: line!(),
-                column: column!(),
-            },
-            raw_actual: stringify!($actual),
-            expected: None,
-            raw_expected: None,
+        {
+            static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let index = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            $crate::Expect {
+                file_position: $crate::FilePosition {
+                    file: file!(),
+                    line: line!(),
+                    column: column!(),
+                },
+                raw_actual: stringify!($actual),
+                expected: [],
+                raw_expected: [],
+                assertion_index: index,
+            }
+            .assert_debug_eq($actual)
         }
-        .assert_debug_eq($actual)
     };
-    ($actual:expr, $expected:literal) => {
-        $crate::Expect {
-            file_position: $crate::FilePosition {
-                file: file!(),
-                line: line!(),
-                column: column!(),
-            },
-            raw_actual: stringify!($actual),
-            expected: Some($expected),
-            raw_expected: Some(stringify!($expected)),
+    ($actual:literal, $($expected:literal),*) => {
+        {
+            static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let index = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            $crate::Expect {
+                file_position: $crate::FilePosition {
+                    file: file!(),
+                    line: line!(),
+                    column: column!(),
+                },
+                raw_actual: stringify!($actual),
+                expected: [$($expected),*],
+                raw_expected: [$(stringify!($expected)),*],
+                assertion_index: index,
+            }
+            .assert_eq($actual)
         }
-        .assert_debug_eq($actual)
+    };
+    ($actual:expr, $($expected:literal),*) => {
+        {
+            static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let index = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            $crate::Expect {
+                file_position: $crate::FilePosition {
+                    file: file!(),
+                    line: line!(),
+                    column: column!(),
+                },
+                raw_actual: stringify!($actual),
+                expected: [$($expected),*],
+                raw_expected: [$(stringify!($expected)),*],
+                assertion_index: index,
+            }
+            .assert_debug_eq($actual)
+        }
     };
 }
 
 /// Self-updating string literal.
-#[derive(Debug)]
-pub struct Expect {
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct Expect<const N: usize> {
     #[doc(hidden)]
     pub file_position: FilePosition,
     #[doc(hidden)]
     pub raw_actual: &'static str,
     #[doc(hidden)]
-    pub expected: Option<&'static str>,
+    pub expected: [&'static str; N],
     #[doc(hidden)]
-    pub raw_expected: Option<&'static str>,
+    pub raw_expected: [&'static str; N],
+    #[doc(hidden)]
+    pub assertion_index: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct FilePosition {
     #[doc(hidden)]
     pub file: &'static str,
@@ -100,7 +122,7 @@ impl std::fmt::Display for FilePosition {
     }
 }
 
-impl Expect {
+impl<const N: usize> Expect<N> {
     fn trimmed(&self, text: &str) -> String {
         if text.contains('\n') {
             let text = text.strip_prefix('\n').unwrap_or(text);
@@ -132,7 +154,7 @@ impl Expect {
     }
 
     pub fn assert_eq(&self, actual: &str) {
-        if let Some(expected) = self.expected {
+        if let Some(expected) = self.expected.get(self.assertion_index) {
             let expected = self.trimmed(expected);
             if expected != actual {
                 Runtime::fail_expect(self, &expected, actual);
@@ -150,7 +172,7 @@ impl Expect {
         self.assert_eq(&actual)
     }
 
-    fn find_expect_location(&self, file: &str) -> ExpectLocation {
+    fn find_expect_location(&self, file: &str) -> ExpectLocation<N> {
         let line_number: usize = (self.file_position.line - 1).try_into().unwrap(); // Zero-indexed
         let column_number: usize = (self.file_position.column - 1).try_into().unwrap(); // Zero-indexed
         let line_byte_offset = if line_number == 0 {
@@ -172,18 +194,23 @@ impl Expect {
             + file[macro_byte_offset..]
                 .find(self.raw_actual)
                 .expect("Unable to find actual");
-        let actual_range = actual_byte_offset..(actual_byte_offset + self.raw_actual.len());
+        // let actual_range = actual_byte_offset..(actual_byte_offset + self.raw_actual.len());
 
-        let expected_range = if let Some(raw_expected) = self.raw_expected {
-            let expect_byte_offset = actual_byte_offset
-                + file[actual_byte_offset..]
+        let mut current_offset = actual_byte_offset + self.raw_actual.len();
+
+        let expected_ranges = self.raw_expected.map(|raw_expected| {
+            let start = current_offset
+                + file[current_offset..]
                     .find(raw_expected)
                     .expect("Unable to find expected");
-            expect_byte_offset..(expect_byte_offset + raw_expected.len())
-        } else {
-            let expect_byte_offset = actual_byte_offset + self.raw_actual.len();
-            expect_byte_offset..expect_byte_offset
-        };
+            let end = start + raw_expected.len();
+            current_offset = end;
+            start..end
+        });
+
+        let start_index = actual_byte_offset;
+        let end_index = current_offset;
+
         let line_indent = file[line_byte_offset..]
             .chars()
             .take_while(|&c| c == ' ')
@@ -191,15 +218,17 @@ impl Expect {
 
         ExpectLocation {
             line_indent,
-            actual_range,
-            expected_range,
+            expected_ranges,
+            start_index,
+            end_index,
         }
     }
 }
 
 #[derive(Debug)]
-struct ExpectLocation {
+struct ExpectLocation<const N: usize> {
     line_indent: usize,
-    actual_range: Range<usize>,
-    expected_range: Range<usize>,
+    expected_ranges: [Range<usize>; N],
+    start_index: usize,
+    end_index: usize,
 }

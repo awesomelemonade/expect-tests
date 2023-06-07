@@ -1,4 +1,8 @@
-use crate::{patchwork::Patchwork, runtime::format_patch, str_lit_kind::StrLitKind};
+use crate::{
+    patchwork::{PatchOrdering, Patchwork},
+    runtime::format_patch,
+    str_lit_kind::StrLitKind,
+};
 
 use super::*;
 
@@ -142,33 +146,69 @@ fn test_format_patch_single_line() {
 #[test]
 fn test_patchwork() {
     let mut patchwork = Patchwork::new("one two three".to_string());
-    patchwork.patch_range(4..7, "zwei");
-    patchwork.patch_range(0..3, "один");
-    patchwork.patch_range(8..13, "3");
-    patchwork.patch_insert(13, "333");
+    patchwork.patch_range(4..7, "zwei", PatchOrdering::Normal);
+    patchwork.patch_range(0..3, "один", PatchOrdering::Normal);
+    patchwork.patch_range(8..13, "3", PatchOrdering::Normal);
+    patchwork.patch_insert(13, "333", PatchOrdering::Normal);
     expect!(
         &patchwork,
         r#"
-            Patchwork {
-                text: "один zwei 3333",
-                indels: [
-                    (
-                        0..3,
-                        8,
-                    ),
-                    (
-                        4..7,
-                        4,
-                    ),
-                    (
-                        8..13,
-                        1,
-                    ),
-                    (
-                        13..13,
-                        3,
-                    ),
-                ],
-            }"#
+        Patchwork {
+            text: "один zwei 3333",
+            patches: [
+                Patch {
+                    deletion_range: 0..3,
+                    insertion_size: 8,
+                    ordering: Normal,
+                },
+                Patch {
+                    deletion_range: 4..7,
+                    insertion_size: 4,
+                    ordering: Normal,
+                },
+                Patch {
+                    deletion_range: 8..13,
+                    insertion_size: 1,
+                    ordering: Normal,
+                },
+                Patch {
+                    deletion_range: 13..13,
+                    insertion_size: 3,
+                    ordering: Normal,
+                },
+            ],
+        }"#
     );
+}
+
+#[test]
+pub fn test_multi_expect() {
+    for i in 0..2 {
+        let j = i..i + 1;
+        let z = (i, i);
+        expect!(j, "0..1", "1..2");
+        expect!(
+            z,
+            r#"
+            (
+                0,
+                0,
+            )"#,
+            r#"
+            (
+                1,
+                1,
+            )"#
+        );
+    }
+}
+
+#[test]
+pub fn test_patch_ordering() {
+    let mut patchwork = Patchwork::new("one two three".to_string());
+    patchwork.patch_insert(13, "555", PatchOrdering::AfterOtherPatches);
+    patchwork.patch_insert(13, "33", PatchOrdering::Normal);
+    patchwork.patch_insert(13, "4", PatchOrdering::Normal);
+    patchwork.patch_insert(13, "2", PatchOrdering::BeforeOtherPatches);
+    expect!(patchwork.text(), r#""one two three2334555""#);
 }
