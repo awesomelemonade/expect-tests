@@ -212,3 +212,33 @@ pub fn test_patch_ordering() {
     patchwork.patch_insert(13, "2", PatchOrdering::BeforeOtherPatches);
     expect!(patchwork.text(), r#""one two three2334555""#);
 }
+
+#[test]
+pub fn test_find_expect_location() {
+    let expect = Expect {
+        file_position: FilePosition {
+            file: "src/tests2.rs",
+            line: 7,
+            column: 5,
+        },
+        raw_actual: "StrLitKind::from(\"\")",
+        expected: ["ABC", "DEF"],
+        raw_expected: ["\"ABC\"", "\"DEF\""],
+        assertion_index: 0,
+    };
+    let file = "use crate::str_lit_kind::StrLitKind;\n\nuse super::*;\n\n#[test]\nfn test_lit_kind_for_patch_empty() {\n    expect!(StrLitKind::from(\"\"), \"ABC\", \"DEF\");\n}\n";
+    let location = expect.find_expect_location(file);
+    expect!(
+        location,
+        r#"
+        ExpectLocation {
+            line_indent: 4,
+            expected_ranges: [
+                132..137,
+                139..144,
+            ],
+            start_index: 110,
+            end_index: 144,
+        }"#
+    );
+}

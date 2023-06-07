@@ -172,17 +172,22 @@ impl<const N: usize> Expect<N> {
         self.assert_eq(&actual)
     }
 
-    fn find_expect_location(&self, file: &str) -> ExpectLocation<N> {
+    fn find_expect_location(&self, file_contents: &str) -> ExpectLocation<N> {
         let line_number: usize = (self.file_position.line - 1).try_into().unwrap(); // Zero-indexed
         let column_number: usize = (self.file_position.column - 1).try_into().unwrap(); // Zero-indexed
         let line_byte_offset = if line_number == 0 {
             0
         } else {
             // Add 1 to skip the newline character
-            file.match_indices('\n').nth(line_number - 1).unwrap().0 + 1
+            file_contents
+                .match_indices('\n')
+                .nth(line_number - 1)
+                .unwrap()
+                .0
+                + 1
         };
         let macro_byte_offset = line_byte_offset
-            + file[line_byte_offset..]
+            + file_contents[line_byte_offset..]
                 .char_indices()
                 .skip(column_number)
                 .skip_while(|&(_, c)| c != '!') // expect
@@ -191,7 +196,7 @@ impl<const N: usize> Expect<N> {
                 .0; // extract index from (index, char)
 
         let actual_byte_offset = macro_byte_offset
-            + file[macro_byte_offset..]
+            + file_contents[macro_byte_offset..]
                 .find(self.raw_actual)
                 .expect("Unable to find actual");
         // let actual_range = actual_byte_offset..(actual_byte_offset + self.raw_actual.len());
@@ -200,7 +205,7 @@ impl<const N: usize> Expect<N> {
 
         let expected_ranges = self.raw_expected.map(|raw_expected| {
             let start = current_offset
-                + file[current_offset..]
+                + file_contents[current_offset..]
                     .find(raw_expected)
                     .expect("Unable to find expected");
             let end = start + raw_expected.len();
@@ -211,7 +216,7 @@ impl<const N: usize> Expect<N> {
         let start_index = actual_byte_offset;
         let end_index = current_offset;
 
-        let line_indent = file[line_byte_offset..]
+        let line_indent = file_contents[line_byte_offset..]
             .chars()
             .take_while(|&c| c == ' ')
             .count();
