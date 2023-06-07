@@ -1,7 +1,15 @@
 [package]
 name = "expect-tests"
 version = "0.1.0"
+description = "Minimalistic snapshot testing library"
+keywords = ["snapshot", "testing", "expect"]
+categories = ["development-tools::testing"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/awesomelemonade/expect-tests"
+authors = ["awesomelemonade"]
 edition = "2021"
+
+exclude = ["./github"]
 
 [dependencies]
 once_cell = "1"
