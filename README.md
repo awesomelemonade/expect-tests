@@ -100,7 +100,7 @@ Check out the [examples](https://github.com/awesomelemonade/expect-tests/blob/ma
 
 ### Alternatives:
 
-- [expect-test](https://docs.rs/expect-test/latest/expect_test/)
+- [expect-test](https://crates.io/crates/expect-test)
 - [insta](https://crates.io/crates/insta)
 - [k9](https://crates.io/crates/k9)
 
