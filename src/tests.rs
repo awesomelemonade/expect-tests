@@ -1,10 +1,10 @@
 use crate::{
+    expect,
+    expect::{Expect, FilePosition},
     patchwork::{PatchOrdering, Patchwork},
     runtime::format_patch,
     str_lit_kind::StrLitKind,
 };
-
-use super::*;
 
 #[test]
 fn test_trivial_assert_empty_literal() {
@@ -14,6 +14,27 @@ fn test_trivial_assert_empty_literal() {
 #[test]
 fn test_trivial_assert_literal() {
     expect!("ABC", "ABC");
+}
+
+#[test]
+fn test_trivial_assert_literal_multiline() {
+    expect!(
+        "ABC\nDEF",
+        r#"
+        ABC
+        DEF"#
+    );
+}
+
+#[test]
+fn test_trivial_assert_literal_multiline2() {
+    expect!(
+        "ABC\nDEF\n",
+        r#"
+        ABC
+        DEF
+        "#
+    );
 }
 
 #[test]
@@ -134,7 +155,19 @@ fn test_lit_kind_for_patch_double_quote_triple_hash() {
 #[test]
 fn test_format_patch_multi_line() {
     let patch = format_patch(0, "hello\nworld\n");
-    expect!(&patch, r##""r#\"\n    hello\n    world\n\"#""##);
+    expect!(&patch, r##""r#\"\n    hello\n    world\n    \"#""##);
+}
+
+#[test]
+
+fn test_format_patch_multi_line2() {
+    let desired_indent = 4;
+    let patch = "struct Test {\n    field_a: u32,\n    field_b: f64,\n    field_c: String,\n}\n";
+    let patch = format_patch(desired_indent, patch);
+    expect!(
+        patch,
+        r##""r#\"\n        struct Test {\n            field_a: u32,\n            field_b: f64,\n            field_c: String,\n        }\n        \"#""##
+    );
 }
 
 #[test]
@@ -242,6 +275,35 @@ pub fn test_find_expect_location() {
         }"#
     );
 }
+#[test]
+pub fn test_find_expect_location_stringify() {
+    let expect = Expect {
+        file_position: FilePosition {
+            file: "src/tests3.rs",
+            line: 5,
+            column: 5,
+        },
+        raw_actual: "stringify!(struct Test { test : u32, })",
+        expected: ["test", "test2"],
+        raw_expected: ["\"test\"", "\"test2\""],
+        assertion_index: 0,
+    };
+    let file = "use super::*;\n\n#[test]\nfn test_stringify() {\n    expect!(\n        stringify!(\n            struct Test {\n                test: u32,\n            }\n        ),\n        \"test\",\n        \"test2\"\n    );\n}\n";
+    let location = expect.find_expect_location(file);
+    expect!(
+        location,
+        r#"
+        ExpectLocation {
+            line_indent: 4,
+            expected_ranges: [
+                164..170,
+                180..187,
+            ],
+            start_index: 66,
+            end_index: 187,
+        }"#
+    );
+}
 
 #[test]
 pub fn test_fibonacci() {
@@ -268,4 +330,71 @@ pub fn test_callback_expect() {
     some_complicated_io_func(|status_value| {
         expect!(status_value, "5", "3", "10");
     })
+}
+
+#[test]
+pub fn test_expect_macro_output() {
+    macro_rules! test {
+        () => {
+            5
+        };
+    }
+    expect!(test!(), "5");
+}
+
+#[test]
+pub fn test_expect_macro_output2() {
+    expect!(stringify!(1 + 1), r#""1 + 1""#);
+}
+
+#[test]
+pub fn test_expect_multiline_macro() {
+    expect!(
+        stringify!(
+            struct Test {
+                field: u32,
+            }
+        ),
+        r#""struct Test { field : u32, }""#
+    );
+}
+
+#[test]
+pub fn test_expect_multiline_no_macro() {
+    expect!(
+        {
+            fn test() -> u32 {
+                5
+            }
+            test()
+        },
+        "5"
+    );
+}
+
+#[test]
+pub fn test_expect_tuple() {
+    expect!(
+        (2, 3),
+        r#"
+        (
+            2,
+            3,
+        )"#
+    );
+}
+
+#[test]
+pub fn test_expect_layered_tuple() {
+    expect!(
+        ((3, 4), 5),
+        r#"
+        (
+            (
+                3,
+                4,
+            ),
+            5,
+        )"#
+    );
 }

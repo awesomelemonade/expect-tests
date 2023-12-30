@@ -7,9 +7,9 @@ use std::{
 use once_cell::sync::{Lazy, OnceCell};
 
 use crate::{
+    expect::{Expect, FilePosition},
     patchwork::{PatchOrdering, Patchwork},
     str_lit_kind::StrLitKind,
-    update_expect, Expect, FilePosition,
 };
 const HELP: &str = "
 You can update all `expect!` tests by running:
@@ -23,6 +23,10 @@ pub struct Runtime {
     per_file: HashMap<&'static str, FileRuntime>,
 }
 static RT: Lazy<Mutex<Runtime>> = Lazy::new(Default::default);
+
+fn update_expect() -> bool {
+    std::env::var("UPDATE_EXPECT").is_ok()
+}
 
 impl Runtime {
     pub fn fail_expect<const N: usize>(expect: &Expect<N>, expected: &str, actual: &str) {
@@ -97,13 +101,18 @@ impl FileRuntime {
 
         let patch = format_patch(loc.line_indent, actual);
         if let Some(expected_range) = loc.expected_ranges.get(index) {
+            // TODO-someday: we need another case for if we convert a single line to a multiline
+            // accepting something like `expect!("ABC\nDEF", "ABC");` will give bad formatting
+            // TODO-someday: what happens if some arguments are multiline and others are not?
             self.patchwork
                 .patch_range(expected_range.clone(), &patch, PatchOrdering::Normal);
         } else {
             let is_multiline = patch.contains('\n');
             let is_first_assertion = expect.assertion_index == 0;
 
-            // TODO-someday: if we're the first assertion, we should queue deletion of all other arguments - we assume that this expect is never called again
+            // TODO-someday: if we're the first assertion, we should queue
+            // deletion of all other arguments - we assume that this expect is
+            // never called again
 
             let indent = " ".repeat(loc.line_indent);
             if is_multiline && is_first_assertion {
@@ -197,6 +206,8 @@ pub fn format_patch(desired_indent: usize, patch: &str) -> String {
         }
         if patch.ends_with('\n') {
             buf.push('\n');
+            buf.push_str(&indent);
+            buf.push_str("    ");
         }
     } else {
         buf.push_str(patch);
