@@ -39,3 +39,24 @@ fn test_struct() {
         "#
     );
 }
+
+#[test]
+fn test_enum() {
+    let output = quote! {
+        enum TrafficLight {
+            Red,
+            Yellow,
+            Green
+        }
+    };
+    expect_tokens!(
+        output,
+        r#"
+        enum TrafficLight {
+            Red,
+            Yellow,
+            Green,
+        }
+        "#
+    );
+}
